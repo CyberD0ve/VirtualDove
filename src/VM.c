@@ -2,11 +2,12 @@
 #include <stdio.h>
 #include "inc/struct.h"
 
-int running = 1;
 
 VirtualMachine* initVM(int size){
-    printf("[+] Initialing Virtual Machine...\n");
+    printf("[+] Initializing Virtual Machine with %d bytes of RAM\n", size);
     VirtualMachine* VM = malloc(sizeof(VirtualMachine));
+
+    // Load General Information
     VM->info = malloc(sizeof(INFO));
     VM->info->memsize=size;
 
@@ -24,6 +25,7 @@ VirtualMachine* initVM(int size){
     VM->RAM = malloc(size*sizeof(int));
     return VM;
 }
+
 
 void showReg(CPU* cpu){
     printf("=====[VM Info]=====\n");
@@ -50,7 +52,7 @@ void dump(int* arr, int size){
 
 void showVMInfo(VirtualMachine* VM){
     showReg(VM->CPU);
-    //dump(VM->RAM, VM->info->memsize);
+    dump(VM->RAM, VM->info->memsize);
 }
 
 int mem_get(VirtualMachine* VM, int addr){
@@ -81,9 +83,9 @@ void loadProgramInVM(VirtualMachine* VM, int* program, int program_size){
 }
 
 void exitVM(VirtualMachine* vm) {
-    printf("[+] End of program\n");
+    printf("[+] Stopping VM...\n");
     showReg(vm->CPU);
-    running = 0;
+    vm->info->running=0;
 }
 
 void mov(int* a, int b){ *a=b; }            //Load B in reg A
@@ -129,14 +131,14 @@ int* getRegister(CPU* cpu, int reg){
 void op_parse(VirtualMachine* VM, int op){
     int operation = (op>>24)&0xFF;
     switch(operation){
-        case 0x01 : { //mov
+        case INSTRUCTION_MOV: { //mov
             int operand1 = (op>>16)&0xFF;
             int* reg1 = getRegister(VM->CPU, operand1);
             int operand2 = op&0xFFFF;
             mov(reg1,operand2);
             break;
         }
-        case 0x02 : { //movr
+        case INSTRUCTION_MOVR : { //movr
             int operand1 = (op>>16)&0xFF;
             int* reg1 = getRegister(VM->CPU, operand1);
             int operand2 = (op>>8)&0xFF;
@@ -144,7 +146,7 @@ void op_parse(VirtualMachine* VM, int op){
             movr(reg1,reg2);
             break;
         }
-        case 0x03: { //add
+        case INSTRUCTION_ADD: { //add
             int operand1 = (op>>16)&0xFF;
             int* reg1 = getRegister(VM->CPU, operand1);
             int operand2 = (op>>8)&0xFF;
@@ -152,7 +154,7 @@ void op_parse(VirtualMachine* VM, int op){
             add(reg1,reg2);
             break;
         }
-        case 0x04: { //sub
+        case INSTRUCTION_SUB: { //sub
             int operand1 = (op>>16)&0xFF;
             int* reg1 = getRegister(VM->CPU, operand1);
             int operand2 = (op>>8)&0xFF;
@@ -161,7 +163,7 @@ void op_parse(VirtualMachine* VM, int op){
             break;
         }
 
-        case 0x05: { //cmp
+        case INSTRUCTION_CMP: { //cmp
             int operand1 = (op>>16)&0xFF;
             int* reg1 = getRegister(VM->CPU, operand1);
             int operand2 = (op>>8)&0xFF;
@@ -170,13 +172,13 @@ void op_parse(VirtualMachine* VM, int op){
             break;
         }
 
-        case 0x06: { //jmp
+        case INSTRUCTION_JMP: { //jmp
             int operand1 = op&0xFFFFFF;
             jmp(VM->CPU, operand1);
             break;
         }
 
-        case 0x07 : { //subr
+        case INSTRUCTION_SUBR : { //subr
             int operand1 = (op>>16)&0xFF;
             int* reg1 = getRegister(VM->CPU, operand1);
             int operand2 = op&0xFFFF;
@@ -184,42 +186,41 @@ void op_parse(VirtualMachine* VM, int op){
             break;
         }
 
-        case 0x08 : { //movr
-            int operand1 = (op>>16)&0xFF;
-            int* reg1 = getRegister(VM->CPU, operand1);
-            int operand2 = op&0xFFFF;
-            subr(reg1,operand2);
-            break;
-        }
-
-        case 0x09: { //jz
+        case INSTRUCTION_JZ: { //jz
             int operand1 = op&0xFFFFFF;
             jz(VM->CPU, operand1);
             break;
         }
 
-        case 0x10: { //jnz
+        case INSTRUCTION_JNZ: { //jnz
             int operand1 = op&0xFFFFFF;
             jnz(VM->CPU, operand1);
             break;
         }
 
-        case 0x3C: { //breakpoint
-            printf("[+] Breakpoint hit\n");
+        case TRAP_BREAKPOINT: { //breakpoint
+            printf("[+] Breakpoint hit!\n");
             showReg(VM->CPU);
             break;
         }
 
+        case TRAP_EXIT: { //breakpoint
+            exitVM(VM);
+            break;
+        }
 
         default:
-            exitVM(VM);
+            printf("[!] ERROR : %X not recognized\n", op);
+            showVMInfo(VM);
+            VM->info->running=0;
             break;
     }
 }
 
 void run(VirtualMachine* vm){
-    printf("[+] Launching the program...\n");
-    while(running==1){
+    printf("[+] Starting VM...\n");
+    vm->info->running=1;
+    while(vm->info->running==1){
         int d = mem_get(vm, *vm->CPU->eip);
         op_parse(vm, d);
         *(vm->CPU->eip)+=1;
