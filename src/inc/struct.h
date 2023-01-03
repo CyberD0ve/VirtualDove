@@ -1,6 +1,7 @@
 /* Trap Set */
 #define TRAP_EXIT                   0x00
 #define TRAP_BREAKPOINT             0x3C
+#define TRAP_NOP                    0x90
 
 /* Instruction Set */
 #define INSTRUCTION_MOV             0x01
@@ -36,6 +37,6 @@ typedef struct VirtualMachine{
     /* Control Process Unit */
     CPU* CPU;
     /* Random Access Memory */
-    int *RAM;
+    unsigned char* RAM;
 } VirtualMachine;
 

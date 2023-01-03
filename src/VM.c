@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "inc/struct.h"
-
+#include "inc/CPU.h"
 
 VirtualMachine* initVM(int size){
     printf("[+] Initializing Virtual Machine with %d bytes of RAM\n", size);
@@ -12,17 +12,10 @@ VirtualMachine* initVM(int size){
     VM->info->memsize=size;
 
     /* Init CPU */
-    VM->CPU = malloc(sizeof(CPU));
-    VM->CPU->eax=malloc(sizeof(int));
-    VM->CPU->ebx=malloc(sizeof(int));
-    VM->CPU->ecx=malloc(sizeof(int));
-    VM->CPU->edx=malloc(sizeof(int));
-    VM->CPU->eip=malloc(sizeof(int));
-    VM->CPU->esp=malloc(sizeof(int));
-    VM->CPU->flags=malloc(sizeof(int));
+    initCPU(VM);
 
     /* Init RAM */
-    VM->RAM = malloc(size*sizeof(int));
+    VM->RAM = malloc(size);
     return VM;
 }
 
@@ -41,11 +34,11 @@ void showReg(CPU* cpu){
     printf("Z\t%d\n",(*cpu->flags)&0x1);
 }
 
-void dump(int* arr, int size){
+void dump(unsigned char* arr, int size){
     printf("=====[Dumping RAM]=====\n");
     for(int i=0; i<size; i++){
         if(i%8==0) printf("\n");
-        printf("0x%08X  ", arr[i]);
+        printf("0x%02X  ", arr[i]);
     }
     printf("\n");
 }
@@ -55,68 +48,39 @@ void showVMInfo(VirtualMachine* VM){
     dump(VM->RAM, VM->info->memsize);
 }
 
-int mem_get(VirtualMachine* VM, int addr){
+unsigned char mem_get(VirtualMachine* VM, int addr){
     return VM->RAM[addr];
 }
 
-int* mem_read(VirtualMachine* VM, int addr, int size){
-    int* data = malloc(size*sizeof(int));
+unsigned char* mem_read(VirtualMachine* VM, int addr, int size){
+    unsigned char* data = malloc(size*sizeof(char));
     for(int i=0;i<size;i++){
         data[i]=mem_get(VM,addr++);
     }
     return data;
 }
 
-void mem_write(VirtualMachine* VM, int address, int data){
+void mem_write(VirtualMachine* VM, int address, unsigned char data){
     VM->RAM[address]=data;
 }
 
-void mem_copy(VirtualMachine* VM, int address, int* data, int size){
+void mem_copy(VirtualMachine* VM, int address, unsigned char* data, int size){
     for(int i=0;i<size;i++){
         mem_write(VM,address++,data[i]);
     }
 }
 
-void loadProgramInVM(VirtualMachine* VM, int* program, int program_size){
+void loadProgramInVM(VirtualMachine* VM, unsigned char* program, int program_size){
     mem_copy(VM,0x0,program,program_size); 
     *(VM->CPU->esp) = program_size;
 }
 
 void exitVM(VirtualMachine* vm) {
     printf("[+] Stopping VM...\n");
-    showReg(vm->CPU);
     vm->info->running=0;
 }
 
-void mov(int* a, int b){ *a=b; }            //Load B in reg A
-void movr(int* a, int* b){ mov(a,*b); }     //Load value in reg B in reg A
-void add(int* a, int* b){ *a=*a+*b; }       //Load A+B in reg A
-void sub(int* a, int* b){ *a=*a-*b; }
-void subr(int* a, int b){ *a=*a-b; }
-void xor(int* a, int* b){ *a=*a^*b; }
-void and(int* a, int* b){ *a=*a&*b; }
-void or(int* a, int* b){ *a=*a|*b; }
-void not(int* a){ *a=~(*a);}
-void jmp(CPU* cpu, int addr) { *cpu->eip = addr; }
-void cmp(CPU* cpu, int* a, int* b){
-    if(*a==*b){
-        *cpu->flags|=1;
-    }else{
-        *cpu->flags&=0;
-    }
-}
-void jz(CPU* cpu, int addr) { 
-    if(((*cpu->flags)&1)==1){
-        *cpu->eip = addr;
-    }
-}
-void jnz(CPU* cpu, int addr) {
-    if(((*cpu->flags)&1)==0){
-        *cpu->eip = addr; 
-    }
-}
-
-int* getRegister(CPU* cpu, int reg){
+int* getRegister(CPU* cpu, char reg){
     switch(reg){
         case 0: return cpu->eax;
         case 1: return cpu->ebx;
@@ -128,92 +92,86 @@ int* getRegister(CPU* cpu, int reg){
     }
 }
 
-void op_parse(VirtualMachine* VM, int op){
-    int operation = (op>>24)&0xFF;
+
+unsigned char readByte(VirtualMachine* VM, int addr){
+    return VM->RAM[addr];
+}
+
+int readInt(VirtualMachine* VM, int addr){
+    int res = 0x00000000;
+    res |= readByte(VM, addr)<<24;
+    res |= readByte(VM, addr+1)<<16;
+    res |= readByte(VM, addr+2)<<8;
+    res |= readByte(VM, addr+3);
+    return res;
+}
+
+int fetch(VirtualMachine* VM){
+    unsigned char operation = readByte(VM, *VM->CPU->eip);
+
     switch(operation){
-        case INSTRUCTION_MOV: { //mov
-            int operand1 = (op>>16)&0xFF;
-            int* reg1 = getRegister(VM->CPU, operand1);
-            int operand2 = op&0xFFFF;
-            mov(reg1,operand2);
-            break;
-        }
-        case INSTRUCTION_MOVR : { //movr
-            int operand1 = (op>>16)&0xFF;
-            int* reg1 = getRegister(VM->CPU, operand1);
-            int operand2 = (op>>8)&0xFF;
-            int* reg2 = getRegister(VM->CPU, operand2);
-            movr(reg1,reg2);
-            break;
-        }
-        case INSTRUCTION_ADD: { //add
-            int operand1 = (op>>16)&0xFF;
-            int* reg1 = getRegister(VM->CPU, operand1);
-            int operand2 = (op>>8)&0xFF;
-            int* reg2 = getRegister(VM->CPU, operand2);
-            add(reg1,reg2);
-            break;
-        }
-        case INSTRUCTION_SUB: { //sub
-            int operand1 = (op>>16)&0xFF;
-            int* reg1 = getRegister(VM->CPU, operand1);
-            int operand2 = (op>>8)&0xFF;
-            int* reg2 = getRegister(VM->CPU, operand2);
-            sub(reg1,reg2);
-            break;
+        case INSTRUCTION_MOV: {
+            char reg_code = readByte(VM, *VM->CPU->eip+0x01);
+            int value = readInt(VM, *VM->CPU->eip+0x02);
+            int* reg = getRegister(VM->CPU, reg_code);
+            mov(reg, value);
+            return 0x06;
         }
 
-        case INSTRUCTION_CMP: { //cmp
-            int operand1 = (op>>16)&0xFF;
-            int* reg1 = getRegister(VM->CPU, operand1);
-            int operand2 = (op>>8)&0xFF;
-            int* reg2 = getRegister(VM->CPU, operand2);
+        case INSTRUCTION_ADD: {
+            char reg1_code = readByte(VM, *VM->CPU->eip+0x01);
+            int* reg1 = getRegister(VM->CPU, reg1_code);
+            char reg2_code = readByte(VM, *VM->CPU->eip+0x02);
+            int* reg2 = getRegister(VM->CPU, reg2_code);
+            add(reg1, reg2);
+            return 0x03;
+        }
+
+        case INSTRUCTION_SUBR: {
+            char reg_code = readByte(VM, *VM->CPU->eip+0x01);
+            int value = readInt(VM, *VM->CPU->eip+0x02);
+            int* reg = getRegister(VM->CPU, reg_code);
+            subr(reg, value);
+            return 0x06;
+        }
+
+        case INSTRUCTION_CMP: {
+            char reg1_code = readByte(VM, *VM->CPU->eip+0x01);
+            int* reg1 = getRegister(VM->CPU, reg1_code);
+            char reg2_code = readByte(VM, *VM->CPU->eip+0x02);
+            int* reg2 = getRegister(VM->CPU, reg2_code);
             cmp(VM->CPU, reg1, reg2);
-            break;
+            return 0x03;
         }
 
-        case INSTRUCTION_JMP: { //jmp
-            int operand1 = op&0xFFFFFF;
-            jmp(VM->CPU, operand1);
-            break;
+        case INSTRUCTION_JNZ: {
+            int addr = readInt(VM, *VM->CPU->eip+0x01);
+            jnz(VM->CPU, addr*8);
+            return 0x01;
         }
 
-        case INSTRUCTION_SUBR : { //subr
-            int operand1 = (op>>16)&0xFF;
-            int* reg1 = getRegister(VM->CPU, operand1);
-            int operand2 = op&0xFFFF;
-            subr(reg1,operand2);
-            break;
-        }
-
-        case INSTRUCTION_JZ: { //jz
-            int operand1 = op&0xFFFFFF;
-            jz(VM->CPU, operand1);
-            break;
-        }
-
-        case INSTRUCTION_JNZ: { //jnz
-            int operand1 = op&0xFFFFFF;
-            jnz(VM->CPU, operand1);
-            break;
-        }
 
         case TRAP_BREAKPOINT: { //breakpoint
             printf("[+] Breakpoint hit!\n");
             showReg(VM->CPU);
-            break;
+            dump(VM->RAM, VM->info->memsize);
+            return 0x01;
         }
 
-        case TRAP_EXIT: { //breakpoint
+        case TRAP_NOP: { //NOP
+            return 0x01;
+        }
+
+        case TRAP_EXIT: { //Exit
             exitVM(VM);
-            break;
+            showReg(VM->CPU);
+            return 0x00;
         }
-
         default:
-            printf("[!] ERROR : %X not recognized\n", op);
+            printf("[!] ERROR : 0x%X not recognized\n", operation);
             showVMInfo(VM);
             VM->info->running=0;
-            break;
+            return 0x00;
     }
 }
 
@@ -221,8 +179,7 @@ void run(VirtualMachine* vm){
     printf("[+] Starting VM...\n");
     vm->info->running=1;
     while(vm->info->running==1){
-        int d = mem_get(vm, *vm->CPU->eip);
-        op_parse(vm, d);
-        *(vm->CPU->eip)+=1;
+        int next = fetch(vm);
+        *(vm->CPU->eip)+=next;
     }
 }
